@@ -1,22 +1,22 @@
-# Deployment
+# 部署指南
 
-## Install
+## 安装
 
 ```bash
 pnpm install
 pnpm cf:types
 ```
 
-## KV
+## KV Namespace
 
-Create production and preview namespaces:
+创建生产和 preview namespace：
 
 ```bash
 pnpm wrangler kv namespace create GITHUB_CACHE
 pnpm wrangler kv namespace create GITHUB_CACHE --preview
 ```
 
-Copy the returned `id` and `preview_id` into `wrangler.jsonc`:
+将返回的 `id` 与 `preview_id` 写入 `wrangler.jsonc`：
 
 ```jsonc
 "kv_namespaces": [
@@ -28,57 +28,115 @@ Copy the returned `id` and `preview_id` into `wrangler.jsonc`:
 ]
 ```
 
+## 私有 Worker 模式
+
+生产默认关闭公开入口：
+
+```jsonc
+"workers_dev": false,
+"preview_urls": false
+```
+
+这意味着浏览器不能直接访问 Worker，只能通过 KIRARI Pages 的 Service Binding 间接调用。
+
 ## GitHub Token
 
-The Worker can run without a token, but production should configure one to reduce anonymous rate-limit pressure:
+Worker 可以无 token 运行，但生产建议配置：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
 ```
 
-Use a fine-grained PAT or GitHub App token with the minimum public repository read metadata access needed for card rendering.
+建议使用 fine-grained PAT 或 GitHub App token，只授予公开仓库读取元数据所需权限。
+
+## GitHub Actions
+
+仓库内置：
+
+```text
+.github/workflows/ci.yml
+.github/workflows/deploy.yml
+```
+
+需要在 GitHub 仓库 Secrets 配置：
+
+```text
+CLOUDFLARE_API_TOKEN
+```
+
+Cloudflare API Token 最小权限建议：
+
+```text
+Account: Workers Scripts Edit
+Account: Workers KV Storage Edit
+Account: Account Settings Read
+Zone: Zone Read   # 只有 custom domain / route 场景需要
+```
+
+CI 会执行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm type-check
+pnpm test
+pnpm cf:types
+pnpm deploy:dry
+```
+
+Deploy 工作流会执行：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm type-check
+pnpm test
+wrangler deploy
+```
+
+## KIRARI Pages Service Binding
+
+在 Cloudflare Dashboard 配置：
+
+```text
+Variable name: GHCARD_CACHE
+Service: kirari-ghcard-cache
+```
+
+KIRARI 前端配置：
+
+```toml
+[githubCard]
+apiBase = "/ghc"
+```
 
 ## Origin Allowlist
 
-Set `ALLOWED_ORIGINS` in `wrangler.jsonc`:
+Service Binding 私有模式下通常不需要 CORS 白名单，因为浏览器访问的是 KIRARI 同源 `/ghc/*`。如果同时启用 custom domain / 测试公网入口，可以设置：
 
 ```jsonc
 "ALLOWED_ORIGINS": "https://example.com,https://www.example.com,http://localhost:4321"
 ```
 
-Leave it empty for open CORS during local testing.
+## 预热
 
-## Custom Domain
-
-Production should use a custom domain, for example:
-
-```text
-https://ghcard-cache.example.com/api/github
-```
-
-`workers.dev` is acceptable for validation, but a custom domain is easier to keep stable for KIRARI and easier to protect with Cloudflare WAF and Rate Limiting.
-
-## Public Base URL
-
-Set `PUBLIC_BASE_URL` to the deployed Worker API base before enabling repo prewarm targets:
+如果使用 `repo:` 预热目标，建议设置 `PUBLIC_BASE_URL`：
 
 ```jsonc
-"PUBLIC_BASE_URL": "https://ghcard-cache.example.com/api/github"
+"PUBLIC_BASE_URL": "https://example.com/ghc"
 ```
 
-This prevents cron-prewarmed repo JSON from caching placeholder avatar URLs.
+Service Binding 正常请求会由 KIRARI Pages Function 传入 `X-KIRARI-GHC-PUBLIC-BASE`，不依赖该变量。
 
-## Deploy
+## 部署命令
 
 ```bash
 pnpm type-check
 pnpm test
-pnpm cf:check
+pnpm cf:types
 pnpm deploy:dry
 pnpm deploy
 ```
 
-## Logs
+## 日志
 
 ```bash
 pnpm wrangler tail

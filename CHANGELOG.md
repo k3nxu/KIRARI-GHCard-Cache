@@ -15,3 +15,6 @@ The format is based on Keep a Changelog, and this project uses Conventional Comm
 - Optional Origin allowlist.
 - Optional cron prewarm targets.
 - KIRARI integration, deployment, and operations documentation.
+- Private Service Binding deployment mode with `workers_dev = false`.
+- GitHub Actions CI and Worker deployment workflows.
+- Chinese README, deployment, integration, and operations documentation.

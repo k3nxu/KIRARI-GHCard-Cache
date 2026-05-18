@@ -1,22 +1,37 @@
-# Operations
+# 运维指南
 
-## Cache Headers
+## 推荐生产模式
 
-Inspect:
+```text
+KIRARI Pages /ghc/*
+  -> Service Binding GHCARD_CACHE
+    -> private kirari-ghcard-cache Worker
+```
+
+Worker 配置：
+
+```jsonc
+"workers_dev": false,
+"preview_urls": false
+```
+
+## 缓存 Header
+
+观察：
 
 ```text
 X-Cache: HIT-L1 | HIT-KV | MISS | STALE
 X-Cache-Key: ghcard:v1:...
 ```
 
-Meaning:
+含义：
 
-- `HIT-L1`: Cloudflare edge Cache API hit.
-- `HIT-KV`: KV fresh hit and L1 was refilled in the background.
-- `MISS`: GitHub upstream request was needed.
-- `STALE`: stale KV response was returned while refresh was attempted in the background.
+- `HIT-L1`：Cloudflare edge Cache API 命中。
+- `HIT-KV`：KV fresh 命中，并后台回填 L1。
+- `MISS`：请求了 GitHub upstream。
+- `STALE`：返回 stale KV，并后台尝试刷新。
 
-## TTLs
+## TTL
 
 ```text
 repo metadata: fresh 6h, stale 7d
@@ -24,48 +39,54 @@ contents metadata: fresh 24h, stale 14d
 commits latest-by-path: fresh 1h, stale 7d
 avatar: fresh 7d, stale 30d
 404: fresh 10m, stale 1d
-403/429/5xx: no long-term write, stale fallback first
+403/429/5xx: 不写长期缓存，优先 stale fallback
 ```
 
-## Invalidate All Cache
+## 批量失效缓存
 
-Bump:
+修改：
 
 ```jsonc
 "CACHE_NAMESPACE_VERSION": "v2"
 ```
 
-This changes every cache key prefix and leaves old KV entries to expire naturally.
+旧 KV 条目会自然过期，新请求使用新 key 前缀。
 
-## Handle GitHub 403 Or 429
+## 处理 GitHub 403 / 429
 
-1. Confirm `GITHUB_TOKEN` is configured.
-2. Check `X-Upstream-RateLimit-Remaining` and `X-Upstream-RateLimit-Reset`.
-3. Confirm KIRARI is not repeatedly requesting uncached random refs.
-4. If stale responses exist, users should receive `X-Cache: STALE`.
+1. 确认 Cloudflare Worker Secret `GITHUB_TOKEN` 已配置。
+2. 检查响应 header：`X-Upstream-RateLimit-Remaining` 与 `X-Upstream-RateLimit-Reset`。
+3. 确认 KIRARI 没有生成大量随机 ref/path 请求。
+4. 如果 KV 有 stale，用户应收到 `X-Cache: STALE`。
 
-## Temporarily Disable Origin Allowlist
+## 验证私有 Worker
 
-Set:
+部署后确认：
 
-```jsonc
-"ALLOWED_ORIGINS": ""
+- `*.workers.dev` 入口不可访问。
+- KIRARI `/ghc/repos/...` 可访问。
+- KIRARI `/ghc/avatar/...` 可访问。
+- Network 不直连 `api.github.com`。
+- Network 不直连 `github.com/*.png`。
+
+## 临时回滚
+
+KIRARI 改回：
+
+```toml
+[githubCard]
+apiBase = "https://api.github.com"
 ```
 
-Redeploy. This returns `Access-Control-Allow-Origin: *`.
+或删除 `[githubCard]` 配置，使用默认值。
 
-## Add Prewarm Targets
+## 预热目标
 
-Set `PUBLIC_BASE_URL` before using `repo:` targets:
-
-```jsonc
-"PUBLIC_BASE_URL": "https://ghcard-cache.example.com/api/github"
-```
-
-Edit:
+设置：
 
 ```jsonc
+"PUBLIC_BASE_URL": "https://example.com/ghc",
 "PREWARM_TARGETS": "repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca"
 ```
 
-Cron runs every six hours by default.
+cron 默认每 6 小时执行一次。

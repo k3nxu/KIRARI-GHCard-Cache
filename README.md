@@ -1,17 +1,35 @@
 # KIRARI-GHCard-Cache
 
-Cloudflare Worker cache proxy for KIRARI GitHub cards. It keeps KIRARI clients away from direct `api.github.com` and GitHub avatar requests, improves loading in regions where GitHub is slow or unreachable, and reduces GitHub REST API rate-limit pressure.
+KIRARI GitHub 卡片专用 Cloudflare Worker 缓存代理。它为 KIRARI 的 `::github` 与 `::githubfile` 卡片缓存 GitHub REST API 和头像资源，降低 GitHub rate limit 压力，并改善中国地区访问 GitHub API / 头像域名缓慢或不可达的问题。
 
-## Features
+生产推荐部署为 **私有 Service Binding 模式**：
 
-- GitHub repository, file metadata, latest commit, and avatar proxy endpoints.
-- L1 Cloudflare Cache API plus L2 KV stale fallback.
-- Optional `GITHUB_TOKEN` secret for higher GitHub REST API limits.
-- Optional browser Origin allowlist.
-- Optional cron prewarm targets.
-- KIRARI integration guide included in `docs/KIRARI_INTEGRATION.md`.
+```text
+Browser -> KIRARI Pages /ghc/* -> Pages Function -> Service Binding -> private Worker -> GitHub API / KV / Cache API
+```
+
+Worker 默认关闭公网入口：
+
+```jsonc
+{
+  "workers_dev": false,
+  "preview_urls": false
+}
+```
+
+## 功能
+
+- 缓存 GitHub repo、contents、commits 和 avatar 请求。
+- L1 `caches.default` + L2 KV stale fallback。
+- 可选 `GITHUB_TOKEN` 提升 GitHub REST API 限额。
+- 可选 `ALLOWED_ORIGINS` 浏览器 Origin 白名单。
+- 可选 cron 预热目标。
+- 支持 KIRARI Pages `/ghc/*` 同源私有转发。
+- 支持 GitHub Actions 自动部署 Worker。
 
 ## API
+
+Worker 内部 API 保持为：
 
 ```text
 GET /api/github/repos/:owner/:repo
@@ -22,56 +40,56 @@ GET /healthz
 OPTIONS *
 ```
 
-The repo JSON response keeps the GitHub REST shape, but rewrites `owner.avatar_url` to this Worker:
+KIRARI 对外暴露的推荐路径是：
 
 ```text
-https://your-worker.example.com/api/github/avatar/:owner?size=96
+GET /ghc/repos/:owner/:repo
+GET /ghc/repos/:owner/:repo/contents/:path?ref=:ref
+GET /ghc/repos/:owner/:repo/commits?path=:path&per_page=1&sha=:sha
+GET /ghc/avatar/:owner?size=96
 ```
 
-## Quick Start
+Pages Function 会把 `/ghc/*` 转发为 Worker 内部的 `/api/github/*`。
+
+## 快速开始
 
 ```bash
 pnpm install
 pnpm cf:types
 pnpm type-check
 pnpm test
+pnpm deploy:dry
 ```
 
-Create KV namespaces:
+创建 KV namespace：
 
 ```bash
 pnpm wrangler kv namespace create GITHUB_CACHE
 pnpm wrangler kv namespace create GITHUB_CACHE --preview
 ```
 
-Copy the returned IDs into `wrangler.jsonc`.
+把返回的 `id` 和 `preview_id` 写入 `wrangler.jsonc`。
 
-Configure an optional GitHub token:
+配置 GitHub Token：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
 ```
 
-Run locally:
+部署：
 
 ```bash
-pnpm dev
-```
-
-Validate and deploy:
-
-```bash
-pnpm cf:check
-pnpm deploy:dry
 pnpm deploy
 ```
 
-## Configuration
+## 配置
 
-`wrangler.jsonc` contains non-secret settings:
+`wrangler.jsonc` 中只放非 secret 配置：
 
 ```jsonc
 {
+  "workers_dev": false,
+  "preview_urls": false,
   "vars": {
     "CACHE_NAMESPACE_VERSION": "v1",
     "PUBLIC_BASE_URL": "",
@@ -81,18 +99,18 @@ pnpm deploy
 }
 ```
 
-- `CACHE_NAMESPACE_VERSION`: bump this value to invalidate all cache keys.
-- `PUBLIC_BASE_URL`: public Worker API base, required for repo JSON cron prewarm avatar rewriting.
-- `ALLOWED_ORIGINS`: comma-separated browser Origins. Empty means `Access-Control-Allow-Origin: *`.
-- `PREWARM_TARGETS`: comma-separated cron targets, for example `repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca`.
+- `CACHE_NAMESPACE_VERSION`：批量失效缓存时递增，例如 `v2`。
+- `PUBLIC_BASE_URL`：custom domain / 独立测试模式下用于改写头像 URL；Service Binding 模式由 KIRARI Pages Function 传入 `/ghc` base。
+- `ALLOWED_ORIGINS`：逗号分隔的浏览器 Origin；空值表示 `Access-Control-Allow-Origin: *`。
+- `PREWARM_TARGETS`：逗号分隔的预热目标，例如 `repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca`。
 
-Secrets must not be committed:
+真实 secret 不要写入仓库：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
 ```
 
-## Cache Policy
+## 缓存策略
 
 ```text
 repo metadata: fresh 6h, stale 7d
@@ -100,10 +118,10 @@ contents metadata: fresh 24h, stale 14d
 commits latest-by-path: fresh 1h, stale 7d
 avatar: fresh 7d, stale 30d
 404: fresh 10m, stale 1d
-403/429/5xx: no long-term write, stale fallback first
+403/429/5xx: 不写长期缓存，优先返回 stale
 ```
 
-Debug headers:
+调试 header：
 
 ```text
 X-Cache: HIT-L1 | HIT-KV | MISS | STALE
@@ -112,44 +130,74 @@ X-Upstream-RateLimit-Remaining: ...
 X-Upstream-RateLimit-Reset: ...
 ```
 
-## KIRARI Minimal Config
+## GitHub Actions 部署
 
-After deploying this Worker, KIRARI can point GitHub cards at it:
+仓库包含：
+
+```text
+.github/workflows/ci.yml
+.github/workflows/deploy.yml
+```
+
+需要在 GitHub Secrets 配置：
+
+```text
+CLOUDFLARE_API_TOKEN
+```
+
+Cloudflare API Token 最小权限建议：
+
+```text
+Account: Workers Scripts Edit
+Account: Workers KV Storage Edit
+Account: Account Settings Read
+Zone: Zone Read   # 仅 custom domain / route 场景需要
+```
+
+`GITHUB_TOKEN` 仍通过 Cloudflare Worker Secret 配置，不通过 GitHub Actions 明文传递。
+
+## KIRARI 对接
+
+KIRARI 推荐配置：
 
 ```toml
 [githubCard]
-apiBase = "https://ghcard-cache.example.com/api/github"
+apiBase = "/ghc"
 ```
 
-Use a custom domain in production when possible. A `workers.dev` URL is fine for local validation, but a custom domain is easier to control with Cloudflare WAF, Rate Limiting, and long-term KIRARI configuration.
+KIRARI Pages 项目需要 Service Binding：
 
-See `docs/KIRARI_INTEGRATION.md` for the full integration plan.
+```text
+binding: GHCARD_CACHE
+service: kirari-ghcard-cache
+```
 
-## Development Flow
+完整对接说明见 `docs/KIRARI_INTEGRATION.md`。
 
-1. Change Worker behavior.
-2. Update `README.md`, `docs/`, and `CHANGELOG.md` in the same change.
-3. Run `pnpm type-check`.
-4. Run `pnpm test`.
-5. Run `pnpm cf:types`.
-6. Run `pnpm cf:check`.
-7. Run `pnpm deploy:dry`.
-8. Commit with Conventional Commits.
+## 开发流程
+
+1. 修改 Worker 行为。
+2. 同步更新 `README.md`、`docs/`、`CHANGELOG.md`。
+3. 运行 `pnpm type-check`。
+4. 运行 `pnpm test`。
+5. 运行 `pnpm cf:types`。
+6. 运行 `pnpm deploy:dry`。
+7. 使用 Conventional Commits 提交。
 
 ## FAQ
 
-### Does this fully remove GitHub rate limits?
+### 为什么不用公开 Worker 域名？
 
-No. It reduces GitHub calls through caching and can raise the upstream limit with `GITHUB_TOKEN`. GitHub still enforces upstream limits.
+生产首选 Pages Function + Service Binding。浏览器只访问 KIRARI 自己的 `/ghc/*`，Worker 关闭 `workers.dev` 和 preview URL，暴露面更小。
 
-### Is CORS allowlist real security?
+### CORS 白名单是不是安全边界？
 
-No. It restricts browser calls only. Use Cloudflare WAF or Rate Limiting for abuse control.
+不是。CORS 只约束浏览器调用。真正防滥用应使用 Cloudflare WAF / Rate Limiting。
 
-### Why proxy avatars?
+### 是否必须配置 GitHub Token？
 
-KIRARI cards otherwise still depend on GitHub avatar domains, which can be slow or unreachable in some regions.
+不是。无 token 可以运行，但生产推荐配置 `GITHUB_TOKEN`，避免匿名 GitHub REST API 限额过低。
 
-### Why use both Cache API and KV?
+### 是否需要 custom domain？
 
-Cloudflare Cache API is fast but local to a data center. KV provides a cross-region persistent fallback and stale layer.
+不需要。custom domain 是备选方案；生产主方案是 KIRARI Pages `/ghc/*` + Service Binding。

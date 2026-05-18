@@ -122,7 +122,7 @@ async function upstreamToEnvelope(
 ): Promise<CacheEnvelope> {
   const body = await readBoundedBody(upstream, route.kind === "avatar" ? MAX_AVATAR_BYTES : MAX_JSON_BYTES);
   const contentType = upstream.headers.get("Content-Type") ?? (route.kind === "avatar" ? "image/png" : "application/json; charset=utf-8");
-  const publicBaseUrl = getStringBinding(env, "PUBLIC_BASE_URL") || `${new URL(request.url).origin}/api/github`;
+  const publicBaseUrl = getPublicBaseUrl(request, env);
   const normalizedBody = normalizeUpstreamBody(route, body, contentType, publicBaseUrl);
   const now = Date.now();
   const responseHeaders = filterHeaders(upstream.headers, contentType);
@@ -264,4 +264,12 @@ function isCacheEnvelope(value: unknown): value is CacheEnvelope {
 
 function encodeKeyPart(value: string): string {
   return encodeURIComponent(value);
+}
+
+function getPublicBaseUrl(request: Request, env: Env): string {
+  return (
+    request.headers.get("X-KIRARI-GHC-PUBLIC-BASE") ||
+    getStringBinding(env, "PUBLIC_BASE_URL") ||
+    `${new URL(request.url).origin}/api/github`
+  );
 }

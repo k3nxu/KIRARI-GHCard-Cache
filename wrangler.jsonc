@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kirari-ghcard-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "CACHE_NAMESPACE_VERSION": "v1",
+    "PUBLIC_BASE_URL": "",
+    "ALLOWED_ORIGINS": "",
+    "PREWARM_TARGETS": ""
+  },
+  "kv_namespaces": [
+    {
+      "binding": "GITHUB_CACHE",
+      "id": "<production-kv-id>",
+      "preview_id": "<preview-kv-id>"
+    }
+  ],
+  "triggers": {
+    "crons": ["17 */6 * * *"]
+  }
+}

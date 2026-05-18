@@ -1,0 +1,22 @@
+{
+  "name": "kirari-ghcard-cache",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cf:types": "wrangler types",
+    "cf:check": "wrangler deploy --dry-run",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wrangler": "latest"
+  }
+}

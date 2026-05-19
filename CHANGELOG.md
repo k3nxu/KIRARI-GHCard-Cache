@@ -14,7 +14,8 @@ The format is based on Keep a Changelog, and this project uses Conventional Comm
 
 ### Changed
 
-- Reworked Cloudflare API token deployment docs to use current dashboard/API permission names in tables, and documented `CLOUDFLARE_ACCOUNT_ID` for GitHub Actions deploys.
+- Rebuilt the README and deployment documents around explicit usage paths, variable ownership tables, platform comparison tables, and official reference links.
+- Reworked Cloudflare API token deployment docs to separate Dashboard selections from API permissions reference labels, and documented `CLOUDFLARE_ACCOUNT_ID` for GitHub Actions deploys.
 
 ### Fixed
 

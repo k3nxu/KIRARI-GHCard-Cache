@@ -1,92 +1,91 @@
 # 运维指南
 
-## 推荐生产模式
+本指南用于检查缓存行为、排查部署问题、处理 GitHub rate limit，以及安全回滚。
 
-```text
-KIRARI Pages /ghc/*
-  -> Service Binding GHCARD_CACHE
-    -> private kirari-ghcard-cache Worker
-```
+## 生产模式
 
-Worker 配置：
-
-```jsonc
-"workers_dev": false,
-"preview_urls": false
-```
-
-Vercel 免费版是轻量同源代理：
-
-```text
-KIRARI Vercel /ghc/*
-  -> same-project Function
-    -> GitHub API
-```
-
-Vercel 版默认不使用外部 KV/Redis/Supabase；stale fallback 能力弱于 Cloudflare KV 版。
+| 模式 | 请求路径 | 缓存行为 | 说明 |
+|------|----------|----------|------|
+| Cloudflare Service Binding | KIRARI `/ghc/*` -> private Worker | Cache API + Workers KV + stale fallback | 推荐生产路径 |
+| Vercel 同项目 Function | KIRARI `/ghc/*` -> Vercel Function | HTTP cache headers，可用时尝试 Runtime Cache | 免费版轻量路径 |
+| 直连 GitHub | KIRARI -> `https://api.github.com` | 无 GHC 缓存 | 默认回退 |
 
 ## 缓存 Header
 
-观察：
+| Header | 值 | 含义 |
+|--------|----|------|
+| `X-Cache` | `HIT-L1` | Cloudflare Cache API 命中 |
+| `X-Cache` | `HIT-KV` | Cloudflare Workers KV fresh 命中 |
+| `X-Cache` | `MISS` | 请求了 GitHub upstream |
+| `X-Cache` | `STALE` | 返回 Cloudflare KV stale 数据 |
+| `X-Cache` | `HIT-RUNTIME` | Vercel Runtime Cache fresh 命中 |
+| `X-Cache` | `STALE-RUNTIME` | 返回 Vercel Runtime Cache stale 数据 |
+| `X-Cache-Key` | `ghcard:v1:...` | 归一化后的缓存 key |
+| `X-Upstream-RateLimit-Remaining` | number | GitHub API 剩余额度，GitHub 返回时才有 |
+| `X-Upstream-RateLimit-Reset` | timestamp | GitHub API reset 时间戳，GitHub 返回时才有 |
 
-```text
-X-Cache: HIT-L1 | HIT-KV | MISS | STALE | HIT-RUNTIME | STALE-RUNTIME
-X-Cache-Key: ghcard:v1:...
-```
+## TTL 策略
 
-含义：
+| 资源 | Fresh TTL | Stale TTL | 缓存状态 |
+|------|-----------|-----------|----------|
+| Repo metadata | 6 hours | 7 days | `200`，`404` 使用更短 TTL |
+| Contents metadata | 24 hours | 14 days | `200`，`404` 使用更短 TTL |
+| Latest commit by path | 1 hour | 7 days | `200`，`404` 使用更短 TTL |
+| Avatar | 7 days | 30 days | `200`，`404` 使用更短 TTL |
+| 404 | 10 minutes | 1 day | 缓存短时间，减少重复 miss |
+| 403 / 429 / 5xx | 不长期写入 | 仅已有 stale 可用 | 有 stale 时优先返回 stale |
 
-- `HIT-L1`：Cloudflare edge Cache API 命中。
-- `HIT-KV`：KV fresh 命中，并后台回填 L1。
-- `MISS`：请求了 GitHub upstream。
-- `STALE`：返回 stale KV，并后台尝试刷新。
-- `HIT-RUNTIME`：Vercel Runtime Cache fresh 命中。
-- `STALE-RUNTIME`：Vercel Runtime Cache stale fallback。
-- `MISS`：请求了 GitHub upstream，并依赖对应平台缓存写入或 HTTP cache headers。
+## 常见操作
 
-## TTL
+### 批量失效缓存
 
-```text
-repo metadata: fresh 6h, stale 7d
-contents metadata: fresh 24h, stale 14d
-commits latest-by-path: fresh 1h, stale 7d
-avatar: fresh 7d, stale 30d
-404: fresh 10m, stale 1d
-403/429/5xx: 不写长期缓存，优先 stale fallback
-```
-
-## 批量失效缓存
-
-修改：
+递增 `CACHE_NAMESPACE_VERSION`：
 
 ```jsonc
 "CACHE_NAMESPACE_VERSION": "v2"
 ```
 
-旧 KV 条目会自然过期，新请求使用新 key 前缀。
+缓存 key 中包含该版本。旧条目自然过期，新请求使用新前缀。
 
-## 处理 GitHub 403 / 429
+### 添加 Cloudflare 预热目标
 
-1. 确认运行平台已经配置 `GITHUB_TOKEN`：
-   - Cloudflare：配置在 Worker Secret，命令是 `pnpm wrangler secret put GITHUB_TOKEN`。
-   - Vercel：配置在 Project Environment Variables。
-2. 检查响应 header：`X-Upstream-RateLimit-Remaining` 与 `X-Upstream-RateLimit-Reset`。
-3. 确认 KIRARI 没有生成大量随机 ref/path 请求。
-4. 如果 KV 有 stale，用户应收到 `X-Cache: STALE`。
+在 `wrangler.jsonc` vars 或 Worker 环境变量中设置 `PREWARM_TARGETS`：
 
-## 验证私有 Worker
+```jsonc
+"PUBLIC_BASE_URL": "https://example.com/ghc",
+"PREWARM_TARGETS": "repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca"
+```
 
-部署后确认：
+| 目标类型 | 格式 |
+|----------|------|
+| Repo | `repo:owner/repo` |
+| Contents | `content:owner/repo:path/to/file.md` |
+| Commits | `commits:owner/repo:path/to/file.md` |
+| Avatar | `avatar:owner` |
 
-- `*.workers.dev` 入口不可访问。
-- KIRARI `/ghc/repos/...` 可访问。
-- KIRARI `/ghc/avatar/...` 可访问。
-- Network 不直连 `api.github.com`。
-- Network 不直连 `github.com/*.png`。
+repo 预热需要 `PUBLIC_BASE_URL`，因为 repo JSON 中包含 `owner.avatar_url`，Worker 需要知道用哪个公开 base 改写头像 URL。
 
-## 临时回滚
+### 处理 GitHub 403 或 429
 
-KIRARI 改回：
+| Step | 检查 | 修复 |
+|------|------|------|
+| 1 | 运行时平台是否配置了 `GITHUB_TOKEN` | Cloudflare: `pnpm wrangler secret put GITHUB_TOKEN`；Vercel: Project Environment Variables |
+| 2 | 响应是否包含 `X-Upstream-RateLimit-Remaining` | 如果额度低，等待 `X-Upstream-RateLimit-Reset` 或添加 token |
+| 3 | KIRARI card 是否生成大量随机 ref/path 请求 | 避免在 Markdown card 中使用随机 ref |
+| 4 | 是否有 stale cache 可用 | Cloudflare 应返回 `X-Cache: STALE`；Vercel 仅在 Runtime Cache 可用时支持 |
+
+### 验证 Cloudflare Worker 私有暴露面
+
+| 检查项 | 预期 |
+|--------|------|
+| `wrangler.jsonc` 中的 `workers_dev` | `false` |
+| `wrangler.jsonc` 中的 `preview_urls` | `false` |
+| 浏览器请求 URL | KIRARI 同源 `/ghc/*` |
+| Worker 直接公开 URL | 不作为生产入口 |
+
+### 回滚 KIRARI
+
+KIRARI 改回直连 GitHub：
 
 ```toml
 [githubCard]
@@ -97,15 +96,32 @@ enabled = false
 provider = "none"
 ```
 
-或删除 `[githubCard]` 配置，使用默认值。
+然后重新构建 KIRARI。生成的 `/ghc` runtime route 会被 materializer 删除。
 
-## 预热目标
+## Troubleshooting
 
-设置：
+| 现象 | 可能原因 | 检查位置 | 修复 |
+|------|----------|----------|------|
+| 浏览器仍请求 `api.github.com` | KIRARI `githubCard.apiBase` 仍指向 GitHub | `kirari.config.toml` | 设置 `apiBase = "/ghc"` 并重新构建 |
+| `/ghc/repos/...` 返回 404 | runtime adapter route 没有生成 | KIRARI adapter 配置和 build log | 设置 `githubCard.adapter.enabled = true`，provider 为 `cloudflare` 或 `vercel` |
+| Cloudflare `/ghc/*` 返回 binding 错误 | Pages Service Binding 缺失或名称不一致 | Cloudflare Pages bindings | 添加名为 `GHCARD_CACHE` 的 binding，或让名称匹配 `serviceBinding` |
+| 头像仍指向 GitHub | public base header 或 URL rewrite 未生效 | 响应 JSON 的 `owner.avatar_url` | 检查 KIRARI 生成 route 和 `X-KIRARI-GHC-PUBLIC-BASE` |
+| GitHub rate limit 错误仍出现 | 运行时 `GITHUB_TOKEN` 缺失或无效 | 运行时平台 secret/env | 在对应运行时平台重新配置 `GITHUB_TOKEN` |
+| GitHub Actions deploy 被跳过 | 缺少 `CLOUDFLARE_ACCOUNT_ID` 或 `CLOUDFLARE_API_TOKEN` | GitHub Repository Secrets | 添加两个 secrets |
+| Vercel 在 GitHub 故障时没有 stale fallback | Runtime Cache 不可用 | `X-Cache` header | 需要持久 stale fallback 时使用 Cloudflare 路径 |
 
-```jsonc
-"PUBLIC_BASE_URL": "https://example.com/ghc",
-"PREWARM_TARGETS": "repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca"
+## 日志命令
+
+Cloudflare Worker 日志：
+
+```bash
+pnpm wrangler tail
 ```
 
-cron 默认每 6 小时执行一次。
+本地验证：
+
+```bash
+pnpm type-check
+pnpm test
+pnpm deploy:dry
+```

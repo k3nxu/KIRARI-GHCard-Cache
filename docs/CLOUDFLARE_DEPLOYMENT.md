@@ -25,11 +25,15 @@ pnpm wrangler kv namespace create GITHUB_CACHE
 pnpm wrangler kv namespace create GITHUB_CACHE --preview
 ```
 
-把返回的 `id` 和 `preview_id` 写入 `wrangler.jsonc`。生产建议配置 GitHub token：
+把返回的 `id` 和 `preview_id` 写入 `wrangler.jsonc`。
+
+生产建议配置 GitHub token。这里的 `GITHUB_TOKEN` 是 Worker 运行时访问 GitHub REST API 用的，需要配置到 **Cloudflare Worker Secret**：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
 ```
+
+如果使用 GitHub Actions 自动部署，还需要在 **GitHub Repository Secrets** 配置 `CLOUDFLARE_API_TOKEN`。它只负责部署权限，不会用于请求 GitHub API。
 
 部署：
 

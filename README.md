@@ -77,7 +77,7 @@ pnpm wrangler kv namespace create GITHUB_CACHE --preview
 
 把返回的 `id` 和 `preview_id` 写入 `wrangler.jsonc`。
 
-配置 GitHub Token：
+配置 GitHub Token。这里的 `GITHUB_TOKEN` 是 Worker 运行时访问 GitHub API 用的 token，需要配置到 **Cloudflare Worker Secret**：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
@@ -97,7 +97,7 @@ pnpm type-check
 pnpm test
 ```
 
-导入 Vercel 后，`vercel.json` 会把 `/ghc/*` rewrite 到 `/api/ghc/*`。生产建议在 Vercel 环境变量里配置 `GITHUB_TOKEN`。
+导入 Vercel 后，`vercel.json` 会把 `/ghc/*` rewrite 到 `/api/ghc/*`。生产建议在 **Vercel Project Environment Variables** 里配置 `GITHUB_TOKEN`。
 
 ## 配置
 
@@ -121,11 +121,20 @@ pnpm test
 - `ALLOWED_ORIGINS`：逗号分隔的浏览器 Origin；空值表示 `Access-Control-Allow-Origin: *`。
 - `PREWARM_TARGETS`：逗号分隔的预热目标，例如 `repo:saicaca/fuwari,content:saicaca/fuwari:README.md,commits:saicaca/fuwari:README.md,avatar:saicaca`。
 
-真实 secret 不要写入仓库：
+真实 secret 不要写入仓库。不同平台的配置位置不同：
+
+| 变量 | 用途 | 配置位置 |
+|------|------|----------|
+| `GITHUB_TOKEN` | 运行时访问 GitHub REST API，提高 rate limit | Cloudflare Worker Secret 或 Vercel Project Environment Variables |
+| `CLOUDFLARE_API_TOKEN` | GitHub Actions 部署 Cloudflare Worker | GitHub Repository Secrets |
+
+Cloudflare Worker 配置 `GITHUB_TOKEN`：
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
 ```
+
+Vercel 配置 `GITHUB_TOKEN`：进入 **Vercel Project → Settings → Environment Variables**，新增 `GITHUB_TOKEN`，选择 Production / Preview 环境。
 
 ## 缓存策略
 
@@ -171,7 +180,9 @@ Account: Account Settings Read
 Zone: Zone Read   # 仅 custom domain / route 场景需要
 ```
 
-`GITHUB_TOKEN` 仍通过 Cloudflare Worker Secret 配置，不通过 GitHub Actions 明文传递。
+注意：`CLOUDFLARE_API_TOKEN` 只给 GitHub Actions 用来执行 `wrangler deploy`。它不是 GitHub API token，也不会被 Worker/Vercel Function 用来请求 GitHub。
+
+如果部署 Cloudflare Worker，`GITHUB_TOKEN` 要配置在 Cloudflare Worker Secret；如果部署 Vercel，`GITHUB_TOKEN` 要配置在 Vercel Project Environment Variables。不要把真实 `GITHUB_TOKEN` 写进仓库或 workflow YAML。
 
 如果 `CLOUDFLARE_API_TOKEN` 尚未配置，Deploy 工作流仍会完成安装、类型检查和测试，但会跳过真正的 Worker 发布步骤，避免仓库初始化阶段出现无意义的红灯。配置该 Secret 后，下一次推送或手动触发会执行 `wrangler deploy`。
 
@@ -220,7 +231,7 @@ service: kirari-ghcard-cache
 
 ### 是否必须配置 GitHub Token？
 
-不是。无 token 可以运行，但生产推荐配置 `GITHUB_TOKEN`，避免匿名 GitHub REST API 限额过低。
+不是。无 token 可以运行，但生产推荐配置 `GITHUB_TOKEN`，避免匿名 GitHub REST API 限额过低。Cloudflare 部署时配置为 Worker Secret；Vercel 部署时配置为 Project Environment Variable。
 
 ### 是否需要 custom domain？
 

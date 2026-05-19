@@ -14,7 +14,7 @@ README 中的 Deploy with Vercel badge 会导入本仓库。`vercel.json` 会把
 
 ## 环境变量
 
-建议配置：
+建议在 **Vercel Project → Settings → Environment Variables** 配置：
 
 ```text
 GITHUB_TOKEN=<fine-grained public repo read token>
@@ -22,7 +22,7 @@ GHC_ALLOWED_ORIGINS=
 CACHE_NAMESPACE_VERSION=v1
 ```
 
-`GITHUB_TOKEN` 可选，但建议生产配置以降低 GitHub API rate limit 风险。
+`GITHUB_TOKEN` 可选，但建议生产配置以降低 GitHub API rate limit 风险。Vercel 路径不使用 Cloudflare Worker Secret，也不需要 `CLOUDFLARE_API_TOKEN`。
 
 ## 缓存行为
 

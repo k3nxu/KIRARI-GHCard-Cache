@@ -15,6 +15,7 @@ The format is based on Keep a Changelog, and this project uses Conventional Comm
 ### Fixed
 
 - Skip the Worker deploy step when `CLOUDFLARE_API_TOKEN` is not configured, while still running install, type-check, and tests.
+- Clarified where to configure `GITHUB_TOKEN` for Cloudflare and Vercel deployments, and separated it from the GitHub Actions `CLOUDFLARE_API_TOKEN`.
 
 ## [0.1.0] - 2026-05-18
 

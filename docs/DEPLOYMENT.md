@@ -43,7 +43,9 @@ pnpm wrangler kv namespace create GITHUB_CACHE --preview
 
 ## GitHub Token
 
-Worker 可以无 token 运行，但生产建议配置：
+Worker 可以无 token 运行，但生产建议配置 `GITHUB_TOKEN`。这个 token 是运行时访问 GitHub REST API 用的，不是 GitHub Actions 部署 token。
+
+Cloudflare Worker 配置位置：**Worker Secret**。
 
 ```bash
 pnpm wrangler secret put GITHUB_TOKEN
@@ -65,6 +67,8 @@ pnpm wrangler secret put GITHUB_TOKEN
 ```text
 CLOUDFLARE_API_TOKEN
 ```
+
+`CLOUDFLARE_API_TOKEN` 只用于 GitHub Actions 调用 Cloudflare API 执行 `wrangler deploy`，不要和运行时的 `GITHUB_TOKEN` 混用。
 
 Cloudflare API Token 最小权限建议：
 
@@ -95,6 +99,13 @@ wrangler deploy
 ```
 
 如果仓库还没有配置 `CLOUDFLARE_API_TOKEN`，Deploy 工作流会跳过 `wrangler deploy`，但仍保留前置检查。这适合刚初始化仓库或还没完成 Cloudflare 授权的阶段；配置 Secret 后无需修改 workflow，重新触发即可发布。
+
+## Token 配置对照
+
+| 变量 | 用途 | 配置位置 |
+|------|------|----------|
+| `GITHUB_TOKEN` | Worker 运行时请求 GitHub API，提高 GitHub rate limit | Cloudflare Worker Secret |
+| `CLOUDFLARE_API_TOKEN` | GitHub Actions 部署 Worker | GitHub Repository Secrets |
 
 ## KIRARI Pages Service Binding
 

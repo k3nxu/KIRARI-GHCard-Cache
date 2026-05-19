@@ -67,7 +67,9 @@ avatar: fresh 7d, stale 30d
 
 ## 处理 GitHub 403 / 429
 
-1. 确认 Cloudflare Worker Secret 或 Vercel Environment Variable `GITHUB_TOKEN` 已配置。
+1. 确认运行平台已经配置 `GITHUB_TOKEN`：
+   - Cloudflare：配置在 Worker Secret，命令是 `pnpm wrangler secret put GITHUB_TOKEN`。
+   - Vercel：配置在 Project Environment Variables。
 2. 检查响应 header：`X-Upstream-RateLimit-Remaining` 与 `X-Upstream-RateLimit-Reset`。
 3. 确认 KIRARI 没有生成大量随机 ref/path 请求。
 4. 如果 KV 有 stale，用户应收到 `X-Cache: STALE`。

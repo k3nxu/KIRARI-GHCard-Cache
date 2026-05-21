@@ -1,97 +1,60 @@
-# 部署指南
+# 部署入口
 
-本页是部署入口。先根据 KIRARI 的托管平台选择路径，再阅读对应平台文档。
+先根据 KIRARI 托管平台选择路径，再阅读对应平台文档。
 
-## 选择部署路径
+## 平台选择
 
-| 托管目标 | 推荐设置 | 缓存强度 | 是否需要公开业务域名 | 文档 |
-|----------|----------|----------|----------------------|------|
-| KIRARI 部署在 Cloudflare Pages | KIRARI `/ghc/*` Pages Function 通过 Service Binding 调用私有 `kirari-ghcard-cache` Worker | 强：Cache API + Workers KV + stale fallback | 不需要 | [Cloudflare 部署](CLOUDFLARE_DEPLOYMENT.md) |
-| KIRARI 部署在 Vercel | KIRARI 构建同项目 `/ghc/*` Vercel Function | 基础：HTTP cache headers，可用时尝试 Runtime Cache | 不需要 | [Vercel 部署](VERCEL_DEPLOYMENT.md) |
-| GHC 单独部署在 Vercel | 将本仓库导入 Vercel，KIRARI 调用该项目 `/ghc/*` | 基础：HTTP cache headers，可用时尝试 Runtime Cache | 使用 Vercel 项目 URL | [Vercel 部署](VERCEL_DEPLOYMENT.md) |
-| KIRARI 纯静态部署且无运行时 route | 不启用 adapter | 无 GHC 缓存 | 不需要 | KIRARI 直连 `https://api.github.com` |
+| KIRARI 托管 | 推荐 | 缓存 | 文档 |
+|------------|------|------|------|
+| Cloudflare Pages | 私有 Worker + Service Binding | Cache API + KV + stale | [Cloudflare 部署](CLOUDFLARE_DEPLOYMENT.md) |
+| Vercel | 同项目 Vercel Function | HTTP Cache + 可选 Runtime Cache | [Vercel 部署](VERCEL_DEPLOYMENT.md) |
+| 纯静态（无运行时 route） | 不启用 adapter，直连 GitHub | 无缓存 | [KIRARI 对接](KIRARI_INTEGRATION.md) |
 
-## 变量归属
+## 变量归属总表
 
-| 名称 | 谁使用 | 配置位置 | 不要配置在 | 用途 |
-|------|--------|----------|------------|------|
-| `GITHUB_TOKEN` | 缓存代理运行时 | Cloudflare Worker Secret 或 Vercel Project Environment Variables | GitHub Actions YAML、`kirari.config.toml`、任何提交到仓库的文件 | 提高 GitHub REST API rate limit |
-| `CLOUDFLARE_ACCOUNT_ID` | GitHub Actions 部署任务 | GitHub Repository Secrets | Cloudflare Worker Secret、Vercel、`kirari.config.toml` | 指定 `wrangler deploy` 的 Cloudflare account |
-| `CLOUDFLARE_API_TOKEN` | GitHub Actions 部署任务 | GitHub Repository Secrets | Cloudflare Worker Secret、Vercel、`kirari.config.toml` | 让 CI 中的 Wrangler 调用 Cloudflare API |
-| `VERCEL_TOKEN` | GitHub Actions 部署任务 | GitHub Repository Secrets | Cloudflare、`kirari.config.toml` | 让 CI 中的 Vercel CLI 部署到 Vercel |
-| `VERCEL_ORG_ID` | GitHub Actions 部署任务 | GitHub Repository Secrets | Cloudflare、`kirari.config.toml` | 可选，指定已有 Vercel team/user scope |
-| `VERCEL_PROJECT_ID` | GitHub Actions 部署任务 | GitHub Repository Secrets | Cloudflare、`kirari.config.toml` | 可选，指定已有 Vercel project |
-| `ALLOWED_ORIGINS` | Cloudflare Worker CORS | `wrangler.jsonc` vars 或 Cloudflare Worker 环境变量 | KIRARI 配置 | 浏览器 Origin 白名单 |
-| `GHC_ALLOWED_ORIGINS` | Vercel Function CORS | Vercel Project Environment Variables | Cloudflare Worker Secret | Vercel 专用 Origin 白名单 |
-| `PUBLIC_BASE_URL` | Cloudflare cron prewarm | `wrangler.jsonc` vars | KIRARI 配置 | 预热时改写头像 URL 的公开 API base |
-| `PREWARM_TARGETS` | Cloudflare cron prewarm | `wrangler.jsonc` vars | KIRARI 配置 | 预热目标列表 |
+| 变量 | 属于 | 配置位置 | 不要配置在 |
+|------|------|----------|-----------|
+| `GITHUB_TOKEN` | 缓存代理运行时 | Cloudflare Worker Secret / Vercel Env | GitHub Actions YAML、`kirari.config.toml`、任何仓库文件 |
+| `CLOUDFLARE_ACCOUNT_ID` | GitHub Actions CI | GitHub Repository Secrets | Worker Secret、Vercel、KIRARI |
+| `CLOUDFLARE_API_TOKEN` | GitHub Actions CI | GitHub Repository Secrets | Worker Secret、Vercel、KIRARI |
+| `VERCEL_TOKEN` | GitHub Actions CI | GitHub Repository Secrets | Cloudflare、KIRARI |
+| `ALLOWED_ORIGINS` | Cloudflare Worker | `wrangler.jsonc` vars / Worker env | KIRARI 配置 |
+| `GHC_ALLOWED_ORIGINS` | Vercel Function | Vercel Project Env | Cloudflare |
+| `PUBLIC_BASE_URL` | Cloudflare cron prewarm | `wrangler.jsonc` vars | KIRARI 配置 |
+| `PREWARM_TARGETS` | Cloudflare cron prewarm | `wrangler.jsonc` vars | KIRARI 配置 |
 
-## Cloudflare 部署摘要
+## CI 权限（Cloudflare 路径）
 
-1. 安装依赖。
-2. 配置 `CLOUDFLARE_ACCOUNT_ID` 和 `CLOUDFLARE_API_TOKEN` GitHub Secrets。
-3. GitHub Actions 会自动创建或复用 `GITHUB_CACHE` Workers KV namespace。
-4. GitHub Actions 会自动运行 `pnpm cf:prepare-config` 和 `pnpm cf:config-check`，确认 `wrangler.jsonc` 不再包含 KV ID 占位符。
-5. 可选：把运行时 `GITHUB_TOKEN` 配成 Cloudflare Worker Secret。
-6. 部署 Worker。
-7. 在 KIRARI Cloudflare Pages 项目中绑定 `GHCARD_CACHE` Service Binding。
-8. KIRARI 设置 `githubCard.apiBase = "/ghc"` 并启用 Cloudflare adapter。
+容易混淆的两个 token：
 
-完整步骤见 [Cloudflare 部署](CLOUDFLARE_DEPLOYMENT.md)。
+| Token | 所属上下文 | 用途 |
+|-------|-----------|------|
+| `GITHUB_TOKEN` | Worker 运行时 | Worker 请求 GitHub API |
+| `CLOUDFLARE_API_TOKEN` | GitHub Actions CI | CI 中的 Wrangler 部署 Worker |
 
-## Vercel 部署摘要
+`CLOUDFLARE_API_TOKEN` 所需权限：
 
-1. 决定 `/ghc/*` Function 放在 KIRARI 项目里，还是作为本仓库的独立 Vercel 项目。
-2. 如果需要提高 GitHub rate limit，在 Vercel Project Environment Variables 配置 `GITHUB_TOKEN`。
-3. KIRARI 设置 `githubCard.apiBase = "/ghc"`。
-4. 验证浏览器请求停留在 `/ghc/*`。
+| 场景 | API 权限（reference 名称） | Scope | 必需 |
+|------|---------------------------|-------|------|
+| `wrangler deploy` | Workers Scripts Write | Account | ✅ |
+| 自动创建/复用 KV namespace | Workers KV Storage Write | Account | ✅ |
+| 管理 Worker route / custom domain | Workers Routes Write | Zone | 可选 |
 
-完整步骤见 [Vercel 部署](VERCEL_DEPLOYMENT.md)。
-
-## Cloudflare GitHub Actions 权限
-
-本项目中有两个容易混淆的 token：
-
-| Token | 属于哪里 | 用途 |
-|-------|----------|------|
-| `GITHUB_TOKEN` | Worker 运行时 | 让部署后的 Worker 请求 GitHub API |
-| `CLOUDFLARE_API_TOKEN` | GitHub Actions | 让 CI 里的 Wrangler 部署 Worker |
-
-`CLOUDFLARE_API_TOKEN` 的权限建议：
-
-| 场景 | Dashboard 选择项 | API permissions reference 名称 | Scope | 是否必需 |
-|------|------------------|--------------------------------|-------|----------|
-| GitHub Actions 执行 `wrangler deploy` | Edit Cloudflare Workers / Workers Scripts Edit | Workers Scripts Write | Account | 必需 |
-| GitHub Actions 自动创建或复用 `GITHUB_CACHE` KV namespace | Workers KV Storage Edit | Workers KV Storage Write | Account | 必需 |
-| 同一个 token 管理 Worker routes 或 custom domain routes | Workers Routes Edit | Workers Routes Write | Zone | 可选 |
-
-默认私有 Service Binding 方案不需要 zone-level route，也不需要 Worker custom domain。
+> 默认私有 Service Binding 方案**不需要** zone-level route 和 Worker custom domain。
 
 ## 验证命令
 
-Cloudflare 路径：
-
 ```bash
+# Cloudflare 路径
 pnpm install
-pnpm cf:types
-pnpm cf:config-check
-pnpm type-check
-pnpm test
-pnpm deploy:dry
-```
+pnpm cf:types && pnpm cf:config-check && pnpm type-check && pnpm test && pnpm deploy:dry
 
-Vercel 路径：
-
-```bash
-pnpm install
-pnpm type-check
-pnpm test
+# Vercel 路径
+pnpm install && pnpm type-check && pnpm test
 ```
 
 ## 官方参考
 
-| 主题 | 官方文档 |
-|------|----------|
-| Cloudflare GitHub Actions 认证和 secrets | [Cloudflare Workers GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/) |
-| Cloudflare API token 权限名称 | [Cloudflare API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/) |
-| `vercel.json` rewrites | [Vercel rewrites](https://vercel.com/docs/routing/rewrites) |
+- [Cloudflare Workers GitHub Actions](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)
+- [Cloudflare API Token 权限](https://developers.cloudflare.com/fundamentals/api/reference/permissions/)
+- [Vercel Rewrites](https://vercel.com/docs/routing/rewrites)

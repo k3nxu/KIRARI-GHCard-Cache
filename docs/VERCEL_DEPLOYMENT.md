@@ -1,87 +1,74 @@
 # Vercel 免费版部署
 
-Vercel 路径是轻量同源代理方案。默认不使用 Cloudflare Worker Secret、Cloudflare KV、Vercel KV、Upstash、Supabase、Firewall、Deployment Protection 或任何付费 add-on。
+轻量同源代理方案。默认不使用外部存储、Vercel KV、Upstash、Supabase 或任何付费 add-on。Hobby 计划可用。
 
-## 选择 Vercel 模式
+## 部署模式
 
-| 模式 | `/ghc/*` 位于哪里 | 浏览器看到的路径 | 适合场景 |
-|------|-------------------|------------------|----------|
-| KIRARI 同项目 adapter | KIRARI Vercel 项目构建时生成 `api/ghc/[...path].ts` | KIRARI 同源 `/ghc/*` | KIRARI 生产部署在 Vercel |
-| GHC 独立 Vercel 项目 | 本仓库作为单独 Vercel 项目导入 | 独立 GHC Vercel 项目的 `/ghc/*` URL | 测试或非 KIRARI 集成 |
-
-如果 KIRARI 本身部署在 Vercel，生产更推荐同项目 adapter，因为浏览器不需要访问单独的 GHC 业务域名。
+| 模式 | `/ghc/*` 位置 | 浏览器路径 | 适用场景 |
+|------|--------------|-----------|----------|
+| **同项目 adapter** | KIRARI Vercel 项目 | 同源 `/ghc/*` | KIRARI 生产部署在 Vercel（推荐） |
+| **独立 Vercel 项目** | 本仓库独立导入 Vercel | 独立项目 URL `/ghc/*` | 测试或非 KIRARI 集成 |
 
 ## 请求链路
 
-KIRARI 同项目 adapter：
-
-```text
-Browser
-  -> KIRARI Vercel /ghc/*
-    -> KIRARI 同项目 Vercel Function
-      -> GitHub API
 ```
+# 同项目 adapter
+Browser → KIRARI Vercel /ghc/*
+  → 同项目 Vercel Function (api/ghc/[...path].ts)
+    → GitHub API
 
-GHC 独立 Vercel 项目：
-
-```text
-Browser or KIRARI
-  -> standalone GHC Vercel project /ghc/*
-    -> Vercel Function
-      -> GitHub API
+# 独立项目
+Browser → standalone GHC /ghc/*
+  → Vercel Function → GitHub API
 ```
 
 ## 独立项目部署
 
-使用 README 顶部的 Deploy with Vercel 按钮，或手动把本仓库导入 Vercel。
+### 1. 导入 Vercel
 
-`vercel.json` 定义了这些 rewrite：
+使用 README 顶部 **Deploy with Vercel** 按钮，或手动导入本仓库。
 
-| Source | Destination |
-|--------|-------------|
-| `/ghc` | `/api/ghc/healthz` |
-| `/ghc/:path*` | `/api/ghc/:path*` |
+### 2. `vercel.json` Rewrite
 
-Function 入口：
+```json
+{
+  "rewrites": [
+    { "source": "/ghc", "destination": "/api/ghc/healthz" },
+    { "source": "/ghc/:path*", "destination": "/api/ghc/:path*" }
+  ]
+}
+```
 
-```text
+### 3. Function 入口
+
+```
 api/ghc/[...path].ts
+  → import { handleVercelRequest } from "../../src/vercel"
 ```
 
 ## GitHub Actions 部署
 
-仓库包含 `Deploy Vercel` workflow。配置 GitHub Repository Secrets 后，push 到 `main` 或手动触发 workflow 即可部署。
-
-| Secret | 是否必需 | 用途 |
-|--------|----------|------|
-| `VERCEL_TOKEN` | 需要 | 允许 GitHub Actions 调用 Vercel CLI 部署 |
+| Secret | 必需 | 用途 |
+|--------|------|------|
+| `VERCEL_TOKEN` | ✅ | CI 中 Vercel CLI 部署 |
 | `VERCEL_ORG_ID` | 可选 | 指定已有 Vercel team/user scope |
 | `VERCEL_PROJECT_ID` | 可选 | 指定已有 Vercel project |
 
-未配置 `VERCEL_TOKEN` 时，workflow 仍会执行 install、type-check 和 test，然后跳过 deploy。
+缺失 `VERCEL_TOKEN` 时 workflow 执行 install → type-check → test，跳过 deploy。
 
 ## 环境变量
 
-在这里配置：
+配置位置：`Vercel Project → Settings → Environment Variables`
 
-```text
-Vercel Project
--> Settings
--> Environment Variables
-```
+| 变量 | 必需 | 示例 | 用途 |
+|------|------|------|------|
+| `GITHUB_TOKEN` | 推荐 | `github_pat_...` | 匿名 60 → 5,000 req/h |
+| `GHC_ALLOWED_ORIGINS` | 否 | `https://ex.com,http://localhost:4321` | CORS 白名单 |
+| `CACHE_NAMESPACE_VERSION` | 否 | `v1` | Runtime Cache key 版本 |
 
-| 变量 | 是否必需 | 示例 | 用途 |
-|------|----------|------|------|
-| `GITHUB_TOKEN` | 非必需，生产推荐 | `github_pat_...` | Function 请求 GitHub REST API 时使用 |
-| `GHC_ALLOWED_ORIGINS` | 非必需 | `https://example.com,http://localhost:4321` | Vercel 专用浏览器 Origin 白名单 |
-| `ALLOWED_ORIGINS` | 非必需 | `https://example.com` | `GHC_ALLOWED_ORIGINS` 未设置时的回退白名单 |
-| `CACHE_NAMESPACE_VERSION` | 非必需 | `v1` | Runtime Cache 可用时使用的缓存 key 版本 |
-
-不要把这些 Vercel 运行时变量配置到 Cloudflare Worker Secret 或 GitHub Actions YAML。
+> `GHC_ALLOWED_ORIGINS` 未设时回退到 `ALLOWED_ORIGINS`。Vercel 变量不配置到 Cloudflare 或 GitHub Actions。
 
 ## KIRARI 同项目配置
-
-KIRARI 配置：
 
 ```toml
 [githubCard]
@@ -93,55 +80,47 @@ provider = "vercel"
 route = "/ghc"
 ```
 
-启用后，KIRARI 会在构建前生成：
-
-```text
-api/ghc/[...path].ts
-```
-
-关闭 adapter 后，KIRARI 会移除生成的 `/ghc` runtime route，并回退到 `https://api.github.com`。
+启用后 KIRARI 构建时生成 `api/ghc/[...path].ts`。关闭 adapter 后移除该文件，回退到 `https://api.github.com`。
 
 ## 缓存行为
 
-Vercel 默认使用 HTTP `Cache-Control`：
-
 | 资源 | `s-maxage` | `stale-while-revalidate` |
-|------|------------|--------------------------|
-| Repo metadata | 6 hours | 7 days |
-| Contents metadata | 24 hours | 14 days |
-| Latest commit by path | 1 hour | 7 days |
-| Avatar | 7 days | 30 days |
+|------|-----------|--------------------------|
+| Repo metadata | 6 h | 7 d |
+| Contents | 24 h | 14 d |
+| Latest commit | 1 h | 7 d |
+| Avatar | 7 d | 30 d |
+| 404 | 10 min | 1 d |
 
-如果运行环境提供 `@vercel/functions` Runtime Cache，handler 会自动尝试使用。若包不可用或 Runtime Cache 不可用，会回退到直接 upstream 请求和 HTTP cache headers。
+`@vercel/functions` Runtime Cache 可用时自动启用（动态 import，缺失时静默回退）。不可用时退化为纯 HTTP cache headers + 直连 upstream。
 
-这条路径弱于 Cloudflare KV 路径。如果需要 GitHub 故障期间仍有持久 stale fallback，使用 Cloudflare 部署。
+> **Vercel 路径无持久 stale fallback**。需要 GitHub 故障期间仍有缓存响应时，使用 [Cloudflare 部署](CLOUDFLARE_DEPLOYMENT.md)。
 
 ## 验证
 
 | 检查项 | 预期 |
 |--------|------|
-| `/ghc/healthz` | 返回 health JSON |
-| `/ghc/repos/saicaca/fuwari` | 返回 repo JSON |
-| `/ghc/avatar/saicaca?size=96` | 返回图片响应 |
-| Browser Network | 请求停留在 `/ghc/*` |
-| Browser Network | card 请求不直连 `api.github.com` |
+| `/ghc/healthz` | `{"ok":true,"runtime":"vercel"}` |
+| `/ghc/repos/saicaca/fuwari` | repo JSON |
+| `/ghc/avatar/saicaca?size=96` | 头像图片 |
+| Browser Network | 请求走 `/ghc/*`，无 `api.github.com` |
 | 响应 header | 存在 `X-Cache` |
 
 ## 免费版边界
 
-| 功能 | 默认 Vercel 路径 |
+| 项目 | 默认 Vercel 路径 |
 |------|------------------|
 | Vercel KV | 不使用 |
-| Upstash | 不使用 |
-| Supabase | 不使用 |
-| Vercel Firewall | 不使用 |
-| Deployment Protection | 不使用 |
+| Upstash / Supabase | 不使用 |
+| Vercel Firewall / Deployment Protection | 不使用 |
 | Custom domain | 不需要 |
 | KV 级别持久 stale cache | 不保证 |
+| Function 最大执行时间 | 300s (Hobby) |
 
-## 官方参考
+---
 
-| 主题 | 官方文档 |
-|------|----------|
-| Deploy with Vercel 按钮格式 | [Vercel Deploy Button](https://vercel.com/docs/deployments/deploy-button) |
-| `vercel.json` rewrites | [Vercel rewrites](https://vercel.com/docs/routing/rewrites) |
+**官方参考**：
+- [Vercel Deploy Button](https://vercel.com/docs/deployments/deploy-button)
+- [Vercel Rewrites](https://vercel.com/docs/routing/rewrites)
+- [Vercel Functions Duration](https://vercel.com/docs/functions/configuring-functions/duration)
+- [@vercel/functions](https://www.npmjs.com/package/@vercel/functions)
